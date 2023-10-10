@@ -15,8 +15,8 @@ def FColorAsPILImage(color_arr, image_width, image_height):
     return Image.fromarray(pix_arr)
 
 def PILImageToFColorArray(image):
-    output_pixels = []
-    for pixel in list(image.getdata()):
-        output_pixels.append(unreal.Color(pixel[2], pixel[1], pixel[0], 255))
-    return output_pixels
+    return [
+        unreal.Color(pixel[2], pixel[1], pixel[0], 255)
+        for pixel in list(image.getdata())
+    ]
         

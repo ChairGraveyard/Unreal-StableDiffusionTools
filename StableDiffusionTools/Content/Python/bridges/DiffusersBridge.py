@@ -86,8 +86,7 @@ def preprocess_mask_inpaint(mask):
     mask = np.tile(mask, (4, 1, 1))
     mask = mask[None].transpose(0, 1, 2, 3)  # what does this step do?
     mask = 1 - mask  # repaint white, keep black
-    mask = torch.from_numpy(mask)
-    return mask
+    return torch.from_numpy(mask)
 
 
 class AbortableExecutor(threading.Thread):
@@ -161,8 +160,6 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
             ActivePipeline = getattr(diffusers, new_model_options.diffusion_pipeline)
         print(f"Loaded pipeline: {ActivePipeline}")
 
-        result = True
-        
         modelname = new_model_options.model if new_model_options.model else "CompVis/stable-diffusion-v1-5"
         kwargs = {
             "torch_dtype": torch.float32 if new_model_options.precision == "fp32" else torch.float16,
@@ -170,7 +167,7 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
             #"safety_checker": None,     # TODO: Init safety checker - this is included to stop models complaining about the missing module
             #"feature_extractor": None,  # TODO: Init feature extractor - this is included to stop models complaining about the missing module
         }
-        
+
         if new_model_options.revision:
             kwargs["revision"] = new_model_options.revision
         if new_model_options.custom_pipeline:
@@ -198,15 +195,14 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
 
             # Dummy passthrough filter
             self.pipe.safety_checker = lambda images, **kwargs: (images, False)
-        else:
-            if hasattr(self, "orig_NSFW_filter"):
-                self.pipe.safety_checker = self.orig_NSFW_filter
-        
+        elif hasattr(self, "orig_NSFW_filter"):
+            self.pipe.safety_checker = self.orig_NSFW_filter
+
         self.set_editor_property("ModelOptions", new_model_options)
         self.model_loaded = True
-        print("Loaded Stable Diffusion model " + modelname)
+        print(f"Loaded Stable Diffusion model {modelname}")
 
-        return result
+        return True
 
     def InitUpsampler(self):
         upsampler = None
@@ -239,17 +235,17 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
         result = unreal.StableDiffusionImageResult()
         guide_img = FColorAsPILImage(input.input_image_pixels, input.options.size_x, input.options.size_y).convert("RGB") if input.input_image_pixels else None
         mask_img = FColorAsPILImage(input.mask_image_pixels, input.options.size_x, input.options.size_y).convert("RGB")  if input.mask_image_pixels else None
-        
+
         inpaint_active = (model_options.capabilities & unreal.ModelCapabilities.INPAINT.value) == unreal.ModelCapabilities.INPAINT.value
         depth_active = (model_options.capabilities & unreal.ModelCapabilities.DEPTH.value)  == unreal.ModelCapabilities.DEPTH.value
         strength_active = (model_options.capabilities & unreal.ModelCapabilities.STRENGTH.value)  == unreal.ModelCapabilities.STRENGTH.value
-        mask_active = depth_active or inpaint_active
         print(f"Capabilities value {model_options.capabilities}, Depth map value: {unreal.ModelCapabilities.DEPTH.value}, Using depthmap? {depth_active}")
         print(f"Capabilities value {model_options.capabilities}, Inpaint value: {unreal.ModelCapabilities.INPAINT.value}, Using inpaint? {inpaint_active}")
         print(f"Capabilities value {model_options.capabilities}, Strength value: {unreal.ModelCapabilities.STRENGTH.value}, Using strength? {strength_active}")
 
         if input.debug_python_images:
             guide_img.show()
+            mask_active = depth_active or inpaint_active
             if mask_active:
                 mask_img.show()
 
@@ -261,9 +257,9 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
             guide_img = preprocess_init_image(guide_img, input.options.out_size_x, input.options.out_size_y)
         else:
             guide_img = preprocess_init_image(guide_img, input.options.out_size_x, input.options.out_size_y)
-        
-        
-        
+
+
+
         max_seed = abs(int((2**31) / 2) - 1)
         seed = random.randrange(0, max_seed) if input.options.seed < 0 else input.options.seed
         positive_prompts = ", ".join([f"({split_p.strip()}:{prompt.weight})" if not inpaint_active else f"{split_p.strip()}" for prompt in input.options.positive_prompts for split_p in prompt.prompt.split(",")])
@@ -300,14 +296,14 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
                     generation_args["depth_map"] = mask_img
                 if strength_active:
                     generation_args["strength"] = input.options.strength
-                
+
                 # Create executor to generate the image in its own thread that we can abort if needed
                 self.executor = AbortableExecutor("ImageThread", lambda generation_args=generation_args: self.pipe(**generation_args))
                 self.executor.start()
                 self.executor.join()
 
                 if not self.executor.result or not self.executor.completed:
-                    print(f"Image generation was aborted")
+                    print("Image generation was aborted")
                     self.abort = False
 
                 images = self.executor.result.images if self.executor.result else None #self.pipe(**generation_args).images
@@ -320,12 +316,21 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
                 result.input = input
                 result.input.options.seed = seed
                 print(f"Seed was {seed}. Saved as {result.input.options.seed}")
-                result.pixel_data =  PILImageToFColorArray(image.convert("RGBA")) if image else [unreal.Color(0,0,0,255) for i in range(input.options.out_size_x * input.options.out_size_y)]
+                result.pixel_data = (
+                    PILImageToFColorArray(image.convert("RGBA"))
+                    if image
+                    else [
+                        unreal.Color(0, 0, 0, 255)
+                        for _ in range(
+                            input.options.out_size_x * input.options.out_size_y
+                        )
+                    ]
+                )
                 result.out_width = image.width if image else input.options.out_size_x
                 result.out_height = image.height if image else input.options.out_size_y
-                result.completed = True if image else False
+                result.completed = bool(image)
 
-                #self.executor = None
+                        #self.executor = None
 
         return result
 
@@ -340,7 +345,15 @@ class DiffusersBridge(unreal.StableDiffusionBridge):
             image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
             image = self.pipe.numpy_to_pil(image)[0]
             pixels = PILImageToFColorArray(image.convert("RGBA"))
-            self.update_image_progress("inprogress", int(step), int(timestep), float(pct_complete), image.width, image.height, pixels)
+            self.update_image_progress(
+                "inprogress",
+                step,
+                timestep,
+                float(pct_complete),
+                image.width,
+                image.height,
+                pixels,
+            )
 
         # Image finished we can now abort image generation
         if self.abort and self.executor:

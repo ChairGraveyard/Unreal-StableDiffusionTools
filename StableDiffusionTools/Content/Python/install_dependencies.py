@@ -35,8 +35,8 @@ class PyDependencyManager(unreal.DependencyManager):
 
         if force_reinstall:
             extra_flags.append("--force-reinstall")
-        print("Installing dependency " + dep_name)
-        
+        print(f"Installing dependency {dep_name}")
+
         if dep_path:
             if dep_path.endswith(".whl"):
                 print("Dowloading wheel")
@@ -47,7 +47,7 @@ class PyDependencyManager(unreal.DependencyManager):
                 dep_name = [f"git+{dep_path}#egg={dep_name}"]
         else:
             dep_name = dep_name.split(' ')
-            
+
         if dep_force_upgrade:
             extra_flags.append("--upgrade")
 
@@ -65,8 +65,7 @@ class PyDependencyManager(unreal.DependencyManager):
                 self.update_dependency_progress(dependency.name, str(stdout_line))
                 # yield stdout_line
             proc.stdout.close()
-            return_code = proc.wait()
-            if return_code:
+            if return_code := proc.wait():
                 err = proc.stderr.read()
                 self.update_dependency_progress(dependency.name, f"ERROR: Failed to install depdendency {dep_name}\nReturn code was {return_code}\nError was {err}")
                 raise subprocess.CalledProcessError(return_code, " ".join(cmd))
@@ -89,7 +88,7 @@ class PyDependencyManager(unreal.DependencyManager):
         status.name = dependency.name
         status.version = "None"
         module_status = importlib.util.find_spec(dependency.module)
-        status.installed = True if module_status else False
+        status.installed = bool(module_status)
         print(f"Module {dependency.module} installed for dependency {dependency.name}: {status.installed}")
         return status
 
@@ -109,7 +108,7 @@ def clone_dependency(repo_name, repo_url):
     from git import Repo, exc
     import git
 
-    print("Cloning dependency " + repo_name)
+    print(f"Cloning dependency {repo_name}")
     repo_path = os.path.join(unreal.Paths().engine_saved_dir(), "pythonrepos", repo_name)
     repo = None
     try:
